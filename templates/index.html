@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSL证书管理工具</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f7fa; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .header h1 { font-size: 24px; color: #303133; }
+        .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        .btn-primary { background: #409eff; color: white; }
+        .btn-danger { background: #f56c6c; color: white; }
+        .btn-success { background: #67c23a; color: white; }
+        .btn:hover { opacity: 0.8; }
+        .card { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 12px rgba(0,0,0,0.1); }
+        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+        .card-header h2 { font-size: 18px; color: #303133; }
+        .server-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 15px; }
+        .server-card { border: 1px solid #ebeef5; border-radius: 8px; padding: 15px; }
+        .server-card .name { font-size: 16px; font-weight: bold; margin-bottom: 10px; }
+        .server-card .info { font-size: 13px; color: #606266; margin-bottom: 5px; }
+        .server-card .expire { font-size: 14px; color: #E6A23C; margin-top: 10px; }
+        .server-card .expire.warning { color: #F56C6C; }
+        .server-card .actions { margin-top: 15px; }
+        .server-card .actions .btn { margin-right: 5px; }
+        .table { width: 100%; border-collapse: collapse; }
+        .table th, .table td { padding: 12px; text-align: left; border-bottom: 1px solid #ebeef5; }
+        .table th { background: #fafafa; color: #606266; font-weight: 500; }
+        .table tr:hover { background: #f5f7fa; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; }
+        .modal.show { display: flex; }
+        .modal-content { background: white; border-radius: 8px; padding: 20px; width: 500px; max-height: 80vh; overflow-y: auto; }
+        .modal-header { display: flex; justify-content: space-between; margin-bottom: 20px; }
+        .modal-header h3 { font-size: 18px; }
+        .close { font-size: 24px; cursor: pointer; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; color: #606266; }
+        .form-group input, .form-group select { width: 100%; padding: 8px; border: 1px solid #dcdfe6; border-radius: 4px; }
+        .form-row { display: flex; gap: 10px; }
+        .form-row .form-group { flex: 1; }
+        .empty { text-align: center; padding: 40px; color: #909399; }
+        .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-right: 5px; }
+        .tag.linux { background: #ecf5ff; color: #409eff; }
+        .tag.windows { background: #f0f9ff; color: #00a0e9; }
+        .tag.nginx { background: #f0f9ec; color: #67c23a; }
+        .tag.apache { background: #fef0f0; color: #f56c6c; }
+        .tag.iis { background: #fdf6ec; color: #e6a23c; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>SSL证书管理工具</h1>
+            <button class="btn btn-primary" onclick="showServerModal()">添加服务器</button>
+        </div>
+
+        <div class="server-grid" id="serverList"></div>
+
+        <div class="card" style="margin-top: 20px;">
+            <div class="card-header">
+                <h2>证书文件</h2>
+                <div>
+                    <input type="file" id="certInput" style="display:none" multiple accept=".pem,.crt,.key,.cer,.der" onchange="handleUpload(this)">
+                    <button class="btn btn-primary" onclick="document.getElementById('certInput').click()">上传证书</button>
+                </div>
+            </div>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>文件名</th>
+                        <th>大小</th>
+                        <th>修改时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="certTable"></tbody>
+            </table>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2>更换记录</h2>
+            </div>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>更换时间</th>
+                        <th>服务器</th>
+                        <th>证书文件</th>
+                        <th>新证书到期</th>
+                        <th>备份路径</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="historyTable"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div id="serverModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modalTitle">添加服务器</h3>
+                <span class="close" onclick="closeModal('serverModal')">&times;</span>
+            </div>
+            <form id="serverForm">
+                <input type="hidden" id="serverId">
+                <div class="form-group">
+                    <label>服务器名称</label>
+                    <input id="serverName" placeholder="如：生产服务器" required>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>服务器地址</label>
+                        <input id="serverHost" placeholder="如：192.168.1.100" required>
+                    </div>
+                    <div class="form-group" style="max-width: 100px;">
+                        <label>端口</label>
+                        <input id="serverPort" type="number" value="22" min="1" max="65535">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>SSH用户名</label>
+                        <input id="serverUsername" placeholder="如：root" required>
+                    </div>
+                    <div class="form-group">
+                        <label>SSH密码</label>
+                        <input id="serverPassword" type="password" required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>服务器类型</label>
+                        <select id="serverType">
+                            <option value="linux">Linux</option>
+                            <option value="windows">Windows</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Web服务器</label>
+                        <select id="serverWebServer">
+                            <option value="nginx">Nginx</option>
+                            <option value="apache">Apache</option>
+                            <option value="iis">IIS</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>证书路径</label>
+                    <input id="serverCertPath" placeholder="如：/etc/nginx/ssl" required>
+                </div>
+                <div class="form-group">
+                    <label>服务路径（执行命令的目录）</label>
+                    <input id="serverWorkDir" placeholder="如：/home/enjoy/Nginx">
+                </div>
+                <div class="form-group">
+                    <label>重启命令</label>
+                    <textarea id="serverRestartCmd" rows="3" placeholder="如：docker-compose -f docker-compose.yml down&#10;支持多行命令"></textarea>
+                </div>
+                <button type="submit" class="btn btn-primary" style="width: 100%;">保存</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="deployModal" class="modal">
+        <div class="modal-content" style="width: 700px; max-width: 95vw;">
+            <div class="modal-header">
+                <h3>部署证书</h3>
+                <span class="close" onclick="closeModal('deployModal')">&times;</span>
+            </div>
+            <form id="deployForm">
+                <input type="hidden" id="deployServerId">
+                <div class="form-group">
+                    <label>部署模式</label>
+                    <select id="deployMode" onchange="toggleDeployMode()">
+                        <option value="all">上传证书 + 执行命令</option>
+                        <option value="upload">仅上传证书</option>
+                        <option value="command">仅执行命令</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>目标服务器</label>
+                    <input id="deployServerName" disabled>
+                </div>
+                <div id="uploadSection">
+                    <div class="form-group">
+                        <label>证书路径</label>
+                        <div style="display: flex; gap: 10px;">
+                            <input id="deployRemotePath" style="flex:1;" disabled>
+                            <button type="button" class="btn btn-primary" onclick="loadRemoteCerts()">获取远程证书</button>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>证书文件映射（选择远程文件对应的本地文件）</label>
+                        <div id="certMappingContainer">
+                            <div style="color: #909399; font-size: 12px;">请先点击"获取远程证书"按钮</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>服务路径（执行命令的目录）</label>
+                    <input id="deployWorkDir" placeholder="如：/home/enjoy/Nginx" disabled>
+                </div>
+                <div id="commandSection">
+                    <div class="form-group">
+                        <label>重启命令</label>
+                        <div id="restartCommands"></div>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>手动执行命令（额外命令）</label>
+                    <div style="display: flex; gap: 10px;">
+                        <input id="manualCommand" placeholder="输入额外命令" style="flex:1;">
+                        <button type="button" class="btn btn-primary" onclick="executeManualCommand()">执行</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>执行日志</label>
+                    <div id="execLog" style="background: #1e1e1e; color: #0f0; padding: 10px; border-radius: 4px; max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all;"></div>
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button type="submit" class="btn btn-success" style="flex: 1;">开始部署</button>
+                    <button type="button" class="btn" style="flex: 1;" onclick="closeModal('deployModal')">关闭</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="resultModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>操作结果</h3>
+                <span class="close" onclick="closeModal('resultModal')">&times;</span>
+            </div>
+            <div id="resultContent"></div>
+        </div>
+    </div>
+
+    <script>
+        let servers = [];
+        let certFiles = [];
+        let history = [];
+
+        async function loadData() {
+            await Promise.all([loadServers(), loadCertFiles(), loadHistory()]);
+        }
+
+        async function loadServers() {
+            try {
+                const res = await fetch('/api/servers');
+                servers = await res.json();
+                renderServers();
+            } catch (e) {
+                console.error('loadServers error:', e);
+            }
+        }
+
+        async function loadCertFiles() {
+            try {
+                const res = await fetch('/api/certs');
+                certFiles = await res.json();
+                renderCertFiles();
+                updateCertSelects();
+            } catch (e) {
+                console.error('loadCertFiles error:', e);
+            }
+        }
+
+        async function loadHistory() {
+            try {
+                const res = await fetch('/api/history');
+                history = await res.json();
+                renderHistory();
+            } catch (e) {
+                console.error('loadHistory error:', e);
+            }
+        }
+
+        function renderServers() {
+            const container = document.getElementById('serverList');
+            if (servers.length === 0) {
+                container.innerHTML = '<div class="empty" style="grid-column: 1/-1;">暂无服务器，请添加</div>';
+                return;
+            }
+            container.innerHTML = servers.map(s => {
+                const cmds = (s.restart_cmd || '').split('\n').filter(c => c.trim());
+                const cmdCount = cmds.length;
+                const cmdPreview = cmds.map(c => `  ${c}`).join('\n');
+                return `
+                <div class="server-card">
+                    <div class="name">
+                        ${s.name}
+                        <span class="tag ${s.type}">${s.type}</span>
+                        <span class="tag ${s.web_server}">${s.web_server}</span>
+                    </div>
+                    <div class="info">${maskIP(s.host)}:****</div>
+                    <div class="info">用户: ***</div>
+                    <div class="info">证书路径: ******</div>
+                    <div class="info">服务路径: ******</div>
+                    <div class="info">重启命令: ******</div>
+                    <div class="expire ${isExpireSoon(s.cert_expire) ? 'warning' : ''}">
+                        ${s.cert_expire ? '到期: ' + s.cert_expire + ' (' + getDaysLeft(s.cert_expire) + '天)' : '到期: 未知'}
+                    </div>
+                    <div class="actions">
+                        <button class="btn btn-success" onclick="openDeploy('${s.id}')">部署证书</button>
+                        <button class="btn" onclick="editServer('${s.id}')">编辑</button>
+                        <button class="btn btn-danger" onclick="deleteServer('${s.id}')">删除</button>
+                    </div>
+                </div>
+            `}).join('');
+        }
+
+        function renderCertFiles() {
+            const tbody = document.getElementById('certTable');
+            if (certFiles.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="empty">暂无证书文件，请上传</td></tr>';
+                return;
+            }
+            tbody.innerHTML = certFiles.map(f => `
+                <tr>
+                    <td>${f.name}</td>
+                    <td>${(f.size / 1024).toFixed(1)} KB</td>
+                    <td>${f.modified}</td>
+                    <td>
+                        <button class="btn" onclick="parseCert('${f.name}')">查看到期</button>
+                        <button class="btn btn-danger" onclick="deleteCert('${f.name}')">删除</button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function renderHistory() {
+            const tbody = document.getElementById('historyTable');
+            if (history.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="empty">暂无记录</td></tr>';
+                return;
+            }
+            tbody.innerHTML = history.map(r => `
+                <tr>
+                    <td>${r.operated_at}</td>
+                    <td>${r.server_name}</td>
+                    <td>${r.cert_mapping ? Object.values(r.cert_mapping).join(', ') : '-'}</td>
+                    <td>${r.new_expire}</td>
+                    <td>${r.backup_path}</td>
+                    <td>
+                        <button class="btn" onclick="showResult('${r.id}')">查看</button>
+                        <button class="btn btn-danger" onclick="deleteHistory('${r.id}')">删除</button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function updateCertSelects() {
+            const crtFiles = certFiles.filter(f => f.name.endsWith('.crt') || f.name.endsWith('.pem'));
+            const keyFiles = certFiles.filter(f => f.name.endsWith('.key') || f.name.endsWith('.pem'));
+            
+            document.getElementById('deployCrtFile').innerHTML = '<option value="">请选择</option>' + 
+                crtFiles.map(f => `<option value="${f.name}">${f.name}</option>`).join('');
+            
+            document.getElementById('deployKeyFile').innerHTML = '<option value="">请选择</option>' + 
+                keyFiles.map(f => `<option value="${f.name}">${f.name}</option>`).join('');
+        }
+
+        function maskIP(ip) {
+            if (!ip) return '***';
+            const parts = ip.split('.');
+            if (parts.length === 4) {
+                return parts[0] + '.' + '***' + '.' + parts[2] + '.' + parts[3];
+            }
+            return '***';
+        }
+
+        function isExpireSoon(expire) {
+            if (!expire) return false;
+            const expDate = new Date(expire);
+            const now = new Date();
+            const days = (expDate - now) / (1000 * 60 * 60 * 24);
+            return days < 30;
+        }
+
+        function getDaysLeft(expire) {
+            if (!expire) return null;
+            const expDate = new Date(expire + 'T00:00:00');
+            const now = new Date();
+            now.setHours(0, 0, 0, 0);
+            expDate.setHours(0, 0, 0, 0);
+            const days = Math.ceil((expDate - now) / (1000 * 60 * 60 * 24));
+            return days;
+        }
+
+        function showServerModal() {
+            document.getElementById('modalTitle').textContent = '添加服务器';
+            document.getElementById('serverForm').reset();
+            document.getElementById('serverId').value = '';
+            document.getElementById('serverPort').value = '22';
+            document.getElementById('serverType').value = 'linux';
+            document.getElementById('serverWebServer').value = 'nginx';
+            document.getElementById('serverModal').classList.add('show');
+        }
+
+        function editServer(id) {
+            const server = servers.find(s => s.id === id);
+            if (!server) return;
+            
+            document.getElementById('modalTitle').textContent = '编辑服务器';
+            document.getElementById('serverId').value = server.id;
+            document.getElementById('serverName').value = server.name;
+            document.getElementById('serverHost').value = server.host;
+            document.getElementById('serverPort').value = server.port;
+            document.getElementById('serverUsername').value = server.username;
+            document.getElementById('serverPassword').value = server.password;
+            document.getElementById('serverType').value = server.type;
+            document.getElementById('serverWebServer').value = server.web_server;
+            document.getElementById('serverCertPath').value = server.cert_path;
+            document.getElementById('serverWorkDir').value = server.work_dir || '';
+            document.getElementById('serverRestartCmd').value = server.restart_cmd || '';
+            document.getElementById('serverModal').classList.add('show');
+        }
+
+        document.getElementById('serverForm').onsubmit = async (e) => {
+            e.preventDefault();
+            
+            const id = document.getElementById('serverId').value;
+            const data = {
+                name: document.getElementById('serverName').value,
+                host: document.getElementById('serverHost').value,
+                port: parseInt(document.getElementById('serverPort').value),
+                username: document.getElementById('serverUsername').value,
+                password: document.getElementById('serverPassword').value,
+                type: document.getElementById('serverType').value,
+                web_server: document.getElementById('serverWebServer').value,
+                cert_path: document.getElementById('serverCertPath').value,
+                work_dir: document.getElementById('serverWorkDir').value,
+                restart_cmd: document.getElementById('serverRestartCmd').value
+            };
+
+            const url = id ? `/api/servers/${id}` : '/api/servers';
+            const method = id ? 'PUT' : 'POST';
+
+            try {
+                await fetch(url, {
+                    method: method,
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+                closeModal('serverModal');
+                loadServers();
+            } catch (err) {
+                alert('保存失败: ' + err.message);
+            }
+        };
+
+        async function deleteServer(id) {
+            if (!confirm('确定删除？')) return;
+            try {
+                await fetch(`/api/servers/${id}`, {method: 'DELETE'});
+                loadServers();
+            } catch (err) {
+                alert('删除失败: ' + err.message);
+            }
+        }
+
+        function openDeploy(serverId) {
+            const server = servers.find(s => s.id === serverId);
+            if (!server) return;
+
+            document.getElementById('deployServerId').value = server.id;
+            document.getElementById('deployServerName').value = server.name;
+            document.getElementById('deployRemotePath').value = server.cert_path;
+            document.getElementById('deployWorkDir').value = server.work_dir || '';
+            document.getElementById('deployMode').value = 'all';
+            document.getElementById('certMappingContainer').innerHTML = '<div style="color: #909399; font-size: 12px;">请先点击"获取远程证书"按钮</div>';
+            document.getElementById('execLog').innerHTML = '';
+            
+            // 显示重启命令
+            const cmds = (server.restart_cmd || '').split('\n').filter(c => c.trim());
+            let cmdsHtml = '';
+            cmds.forEach((cmd, idx) => {
+                cmdsHtml += `<div style="display:flex;align-items:center;gap:10px;margin:8px 0;padding:8px;background:#f5f7fa;border-radius:4px;border:1px solid #ebeef5;">
+                    <input type="checkbox" checked id="cmd_${idx}" value="${cmd}" style="width:18px;height:18px;cursor:pointer;">
+                    <label for="cmd_${idx}" style="flex:1;cursor:pointer;font-size:13px;color:#303133;word-break:break-all;">${cmd}</label>
+                </div>`;
+            });
+            document.getElementById('restartCommands').innerHTML = cmdsHtml || '<span style="color:#909399">未配置命令</span>';
+            
+            toggleDeployMode();
+            document.getElementById('deployModal').classList.add('show');
+        }
+
+        function toggleDeployMode() {
+            const mode = document.getElementById('deployMode').value;
+            document.getElementById('uploadSection').style.display = (mode === 'command') ? 'none' : 'block';
+            document.getElementById('commandSection').style.display = (mode === 'upload') ? 'none' : 'block';
+        }
+
+        let remoteCertFiles = [];
+
+        async function loadRemoteCerts() {
+            const serverId = document.getElementById('deployServerId').value;
+            const remotePath = document.getElementById('deployRemotePath').value;
+            
+            if (!remotePath) {
+                alert('请先输入证书路径');
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/remote_certs', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({server_id: serverId, remote_path: remotePath})
+                });
+                const data = await res.json();
+                
+                if (!data.success) {
+                    alert('获取远程证书失败: ' + data.error);
+                    return;
+                }
+
+                remoteCertFiles = data.files || [];
+                
+                if (remoteCertFiles.length === 0) {
+                    document.getElementById('certMappingContainer').innerHTML = '<div style="color: #F56C6C; font-size: 12px;">远程目录中没有找到证书文件</div>';
+                    return;
+                }
+
+                let html = '<table style="width:100%; border-collapse: collapse;">';
+                html += '<tr><th style="text-align:left; padding:5px;">远程文件</th><th style="text-align:left; padding:5px;">对应本地文件</th></tr>';
+                
+                remoteCertFiles.forEach((remoteFile, index) => {
+                    html += '<tr>';
+                    html += '<td style="padding:5px;">' + remoteFile + '</td>';
+                    html += '<td style="padding:5px;">';
+                    html += '<select id="localFile_' + index + '" style="width:100%; padding: 5px;" onchange="checkFileMatch(\'' + remoteFile + '\', this, ' + index + ')">';
+                    html += '<option value="">-- 选择本地文件 --</option>';
+                    
+                    certFiles.forEach(f => {
+                        html += '<option value="' + f.name + '">' + f.name + '</option>';
+                    });
+                    
+                    html += '</select>';
+                    html += '</td>';
+                    html += '</tr>';
+                });
+                
+                html += '</table>';
+                document.getElementById('certMappingContainer').innerHTML = html;
+                
+            } catch (err) {
+                alert('获取远程证书失败: ' + err.message);
+            }
+        }
+
+        function checkFileMatch(remoteFile, selectEl, index) {
+            const localFile = selectEl.value;
+            if (localFile && localFile !== remoteFile) {
+                const confirmed = confirm('本地文件名 "' + localFile + '" 与远程文件名 "' + remoteFile + '" 不一致，确定继续吗？');
+                if (!confirmed) {
+                    selectEl.value = '';
+                }
+            }
+        }
+
+        async function executeManualCommand() {
+            const command = document.getElementById('manualCommand').value.trim();
+            if (!command) {
+                alert('请输入命令');
+                return;
+            }
+
+            const serverId = document.getElementById('deployServerId').value;
+            const workDir = document.getElementById('deployWorkDir').value;
+            const logEl = document.getElementById('execLog');
+
+            logEl.innerHTML += '\n=== 手动执行命令 ===\n';
+            logEl.innerHTML += `执行: ${command}\n`;
+            logEl.innerHTML += '---\n';
+
+            try {
+                const res = await fetch('/api/exec_command', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        server_id: serverId,
+                        command: command,
+                        work_dir: workDir
+                    })
+                });
+
+                const result = await res.json();
+
+                if (result.success) {
+                    logEl.innerHTML += result.output || '(无输出)';
+                    logEl.innerHTML += '\n---\n';
+                    logEl.innerHTML += `[Exit: ${result.exit_status}]\n`;
+                } else {
+                    logEl.innerHTML += '错误: ' + result.error + '\n';
+                }
+
+                logEl.scrollTop = logEl.scrollHeight;
+
+            } catch (err) {
+                logEl.innerHTML += '执行失败: ' + err.message + '\n';
+            }
+        }
+
+        let deployCommands = [];
+        let deployWorkDir = '';
+        let currentCommandIndex = 0;
+        let deployServerId = '';
+        let allResults = [];
+
+        document.getElementById('deployForm').onsubmit = async (e) => {
+            e.preventDefault();
+
+            const mode = document.getElementById('deployMode').value;
+            const serverId = document.getElementById('deployServerId').value;
+            const workDir = document.getElementById('deployWorkDir').value;
+            const logEl = document.getElementById('execLog');
+            logEl.innerHTML = '';
+
+            deployServerId = serverId;
+            deployWorkDir = workDir;
+
+            // 获取选中的命令
+            deployCommands = [];
+            const checkboxes = document.querySelectorAll('[id^="cmd_"]');
+            checkboxes.forEach(cb => {
+                if (cb.checked) {
+                    deployCommands.push(cb.value);
+                }
+            });
+
+            try {
+                // 模式1：仅上传证书
+                if (mode === 'upload') {
+                    const cert_mapping = {};
+                    let hasUnmapped = false;
+                    remoteCertFiles.forEach((remoteFile, index) => {
+                        const localFile = document.getElementById('localFile_' + index).value;
+                        if (localFile) {
+                            cert_mapping[remoteFile] = localFile;
+                        } else {
+                            hasUnmapped = true;
+                        }
+                    });
+
+                    if (Object.keys(cert_mapping).length === 0) {
+                        alert('请先获取远程证书并选择对应的本地文件');
+                        return;
+                    }
+
+                    logEl.innerHTML += '正在上传证书...\n';
+                    const res = await fetch('/api/deploy', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            server_id: serverId,
+                            remote_path: document.getElementById('deployRemotePath').value,
+                            work_dir: workDir,
+                            cert_mapping: cert_mapping
+                        })
+                    });
+                    const result = await res.json();
+                    if (!result.success) {
+                        logEl.innerHTML += '错误: ' + result.error + '\n';
+                        return;
+                    }
+                    logEl.innerHTML += '证书上传成功!\n';
+                    logEl.innerHTML += '完成!\n';
+                    await loadHistory();
+                    return;
+                }
+
+                // 模式2：上传证书 + 执行命令 或 模式3：仅执行命令
+                if (mode === 'all' || mode === 'command') {
+                    if (mode === 'all') {
+                        const cert_mapping = {};
+                        remoteCertFiles.forEach((remoteFile, index) => {
+                            const localFile = document.getElementById('localFile_' + index).value;
+                            if (localFile) {
+                                cert_mapping[remoteFile] = localFile;
+                            }
+                        });
+
+                        if (Object.keys(cert_mapping).length > 0) {
+                            logEl.innerHTML += '正在上传证书...\n';
+                            const res = await fetch('/api/deploy', {
+                                method: 'POST',
+                                headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify({
+                                    server_id: serverId,
+                                    remote_path: document.getElementById('deployRemotePath').value,
+                                    work_dir: workDir,
+                                    cert_mapping: cert_mapping
+                                })
+                            });
+                            const result = await res.json();
+                            if (!result.success) {
+                                logEl.innerHTML += '错误: ' + result.error + '\n';
+                                return;
+                            }
+                            logEl.innerHTML += '证书上传成功!\n\n';
+                        }
+                    }
+
+                    if (deployCommands.length === 0) {
+                        logEl.innerHTML += '没有选择要执行的命令\n';
+                        return;
+                    }
+
+                    logEl.innerHTML += '=== 开始执行重启命令 ===\n\n';
+                    logEl.innerHTML += `共 ${deployCommands.length} 条命令待执行\n`;
+
+                    allResults = [];
+                    currentCommandIndex = 0;
+                    await executeNextCommand();
+                }
+
+            } catch (err) {
+                logEl.innerHTML += '部署失败: ' + err.message + '\n';
+            }
+        };
+
+        async function executeNextCommand() {
+            const logEl = document.getElementById('execLog');
+            
+            if (currentCommandIndex >= deployCommands.length) {
+                logEl.innerHTML += '\n=== 所有命令执行完成 ===\n';
+                logEl.innerHTML += '\n正在保存记录...\n';
+                await loadHistory();
+                await loadServers();
+                logEl.innerHTML += '完成!\n';
+                alert('部署完成！');
+                return;
+            }
+            
+            const cmd = deployCommands[currentCommandIndex];
+            const cmdNum = currentCommandIndex + 1;
+            const total = deployCommands.length;
+            
+            let fullCmd = cmd;
+            if (deployWorkDir) {
+                fullCmd = `cd ${deployWorkDir} && ${cmd}`;
+                logEl.innerHTML += `[${cmdNum}/${total}] 执行: ${fullCmd}\n`;
+            } else {
+                logEl.innerHTML += `[${cmdNum}/${total}] 执行: ${fullCmd}\n`;
+            }
+            logEl.innerHTML += '---\n';
+            
+            try {
+                const res = await fetch('/api/exec_command', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        server_id: deployServerId,
+                        command: cmd,
+                        work_dir: deployWorkDir
+                    })
+                });
+                
+                const result = await res.json();
+                
+                if (result.success) {
+                    logEl.innerHTML += result.output || '(无输出)';
+                    logEl.innerHTML += '\n---\n';
+                    logEl.innerHTML += `[Exit: ${result.exit_status}]\n\n`;
+                    allResults.push({command: cmd, output: result.output, exit_status: result.exit_status});
+                } else {
+                    logEl.innerHTML += '错误: ' + result.error + '\n';
+                    allResults.push({command: cmd, output: result.error, exit_status: -1});
+                }
+                
+                logEl.scrollTop = logEl.scrollHeight;
+                
+                const continueExec = confirm(`第 ${cmdNum}/${total} 条命令执行完成，是否继续执行下一条？`);
+                
+                if (continueExec) {
+                    currentCommandIndex++;
+                    await executeNextCommand();
+                } else {
+                    logEl.innerHTML += '\n用户取消执行\n';
+                }
+                
+            } catch (err) {
+                logEl.innerHTML += '执行失败: ' + err.message + '\n';
+            }
+        }
+
+        async function handleUpload(input) {
+            const files = input.files;
+            if (!files || files.length === 0) return;
+
+            let successCount = 0;
+            let failCount = 0;
+
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                const formData = new FormData();
+                formData.append('file', file);
+
+                try {
+                    const res = await fetch('/api/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        successCount++;
+                    } else {
+                        failCount++;
+                    }
+                } catch (err) {
+                    failCount++;
+                }
+            }
+
+            if (successCount > 0) {
+                loadCertFiles();
+            }
+
+            if (failCount === 0) {
+                alert('上传成功：' + successCount + '个文件');
+            } else {
+                alert('上传完成：成功' + successCount + '个，失败' + failCount + '个');
+            }
+
+            input.value = '';
+        }
+
+        async function parseCert(filename) {
+            try {
+                const res = await fetch('/api/certs/parse', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({filename})
+                });
+                const data = await res.json();
+                alert(data.expire ? `证书到期时间: ${data.expire}` : '无法解析证书');
+            } catch (err) {
+                alert('解析失败: ' + err.message);
+            }
+        }
+
+        async function deleteCert(filename) {
+            if (!confirm('确定删除证书 ' + filename + '？')) return;
+            try {
+                await fetch(`/api/certs/${filename}`, {method: 'DELETE'});
+                loadCertFiles();
+            } catch (err) {
+                alert('删除失败: ' + err.message);
+            }
+        }
+
+        async function deleteHistory(id) {
+            const record = history.find(h => h.id === id);
+            let msg = '确定删除此记录？';
+            let delete_backup = false;
+            
+            if (record && record.backup_path) {
+                msg = '确定删除此记录？\n\n备份文件位置: ' + record.backup_path;
+                delete_backup = confirm('是否同时删除备份文件夹？\n\n点击"确定"删除记录和备份文件\n点击"取消"仅删除记录');
+            }
+            
+            if (!confirm(msg + '\n\n点击确定继续')) return;
+            
+            try {
+                await fetch(`/api/history/${id}`, {
+                    method: 'DELETE',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({delete_backup: delete_backup})
+                });
+                loadHistory();
+            } catch (err) {
+                alert('删除失败: ' + err.message);
+            }
+        }
+
+        function showResult(r) {
+            const record = history.find(h => h.id === r);
+            if (!record) return;
+            showResultModal({
+                success: true,
+                backup_path: record.backup_path,
+                new_expire: record.new_expire,
+                restart_result: record.restart_result
+            });
+        }
+
+        function showResultModal(data) {
+            const content = document.getElementById('resultContent');
+            if (data.success) {
+                content.innerHTML = `
+                    <p><strong>备份路径：</strong>${data.backup_path}</p>
+                    <p><strong>新证书到期：</strong>${data.new_expire}</p>
+                    <p><strong>重启结果：</strong>${data.restart_result || '无'}</p>
+                `;
+            } else {
+                content.innerHTML = `<p style="color: #F56C6C;">${data.error || '部署失败'}</p>`;
+            }
+            document.getElementById('resultModal').classList.add('show');
+        }
+
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('show');
+        }
+
+        document.addEventListener('DOMContentLoaded', loadData);
+    </script>
+</body>
+</html>

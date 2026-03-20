@@ -1,0 +1,9 @@
+{
+  "default_cert_folder": "certs",
+  "backup_folder": "backups",
+  "web_server_cmds": {
+    "nginx": "systemctl reload nginx",
+    "apache": "systemctl reload httpd",
+    "iis": "iisreset"
+  }
+}

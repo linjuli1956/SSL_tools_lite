@@ -1,0 +1,6 @@
+# SSL Certificate Manager
+# Python >= 3.8 required
+
+flask>=2.0.0
+cryptography>=41.0.0
+paramiko>=3.0.0
